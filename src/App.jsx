@@ -45,6 +45,37 @@ const TASK_TEMPLATES = {
 
 const REVENUE_TARGET = 700000000;
 
+// Hàm hỗ trợ nén ảnh để giảm dung lượng
+const compressImage = (base64Str, maxWidth = 600, maxHeight = 600) => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = base64Str;
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+
+      if (width > height) {
+        if (width > maxWidth) {
+          height *= maxWidth / width;
+          width = maxWidth;
+        }
+      } else {
+        if (height > maxHeight) {
+          width *= maxHeight / height;
+          height = maxHeight;
+        }
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.6)); // Nén chất lượng xuống 60%
+    };
+  });
+};
+
 const App = () => {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('checklist');
@@ -58,9 +89,6 @@ const App = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionTime, setSubmissionTime] = useState(null);
   const [signature, setSignature] = useState(null);
-  const [showIssueModal, setShowIssueModal] = useState(false);
-  const [issueDetail, setIssueDetail] = useState("");
-  const [issuePhoto, setIssuePhoto] = useState(null);
   const [submissionsHistory, setSubmissionsHistory] = useState([]);
 
   const canvasRef = useRef(null);
@@ -69,9 +97,7 @@ const App = () => {
     const initAuth = async () => {
       try {
         await signInAnonymously(auth);
-      } catch (err) {
-        console.error("Auth error:", err);
-      }
+      } catch (err) { console.error("Auth error:", err); }
     };
     initAuth();
     const unsubscribe = onAuthStateChanged(auth, setUser);
@@ -99,12 +125,14 @@ const App = () => {
     input.type = 'file';
     input.accept = 'image/*';
     input.capture = 'environment';
-    input.onchange = (e) => {
+    input.onchange = async (e) => {
       const file = e.target.files[0];
       if (file) {
         const reader = new FileReader();
-        reader.onload = (event) => {
-          setChecklists(prev => prev.map(item => item.id === id ? { ...item, photo: event.target.result } : item));
+        reader.onload = async (event) => {
+          // Tự động nén ảnh ngay sau khi chụp
+          const compressed = await compressImage(event.target.result);
+          setChecklists(prev => prev.map(item => item.id === id ? { ...item, photo: compressed } : item));
         };
         reader.readAsDataURL(file);
       }
@@ -115,14 +143,13 @@ const App = () => {
   const handleComplete = async () => {
     const allDone = checklists.every(item => item.completed && item.photo);
     if (!staffName) return alert("Vui lòng nhập họ tên!");
-    if (!allDone) return alert("Vui lòng chụp ảnh và tích hoàn thành tất cả checklist!");
+    if (!allDone) return alert("Vui lòng chụp ảnh và tích hoàn thành tất cả việc!");
     if (!signature) return alert("Vui lòng ký tên xác nhận!");
 
     setIsSubmitting(true);
     try {
       const signatureData = canvasRef.current?.toDataURL('image/png', 0.3) || "";
       
-      // CHỐT CHẶN: Ép kiểu dữ liệu về chuỗi/boolean đơn giản để Firestore không báo lỗi
       const finalTasks = checklists.map(t => ({
         taskName: String(t.task),
         isDone: Boolean(t.completed),
@@ -133,7 +160,7 @@ const App = () => {
         staff: String(staffName),
         store: String(selectedStoreId),
         role: String(selectedRole),
-        taskList: finalTasks, // Đây là danh sách đã làm sạch
+        taskList: finalTasks,
         members: Number(memberCount),
         reviews: Number(googleReviewCount),
         signImg: String(signatureData),
@@ -145,7 +172,7 @@ const App = () => {
       setSubmissionTime(payload.dateText);
       setIsSubmitted(true);
     } catch (error) {
-      alert("Lỗi hệ thống: " + error.message);
+      alert("Lỗi nộp báo cáo: " + error.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -162,10 +189,10 @@ const App = () => {
 
   return (
     <div className="max-w-md mx-auto h-screen bg-slate-50 flex flex-col overflow-hidden relative font-sans text-slate-900">
-      <header className="bg-white px-6 pt-10 pb-5 border-b border-slate-100 flex justify-between items-center shrink-0 z-20 shadow-sm">
+      <header className="bg-white px-6 pt-10 pb-5 border-b border-slate-100 flex justify-between items-center shrink-0 z-20">
         <div className="text-left">
           <h1 className="text-xl font-black text-slate-900 tracking-tighter uppercase leading-none">FARMERS <span className="text-orange-500">MARKET</span></h1>
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-[3px] mt-1 text-left">{selectedStoreId}</p>
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-[3px] mt-1">{selectedStoreId}</p>
         </div>
         <div className="w-10 h-10 bg-slate-900 rounded-2xl flex items-center justify-center text-white font-black shadow-lg uppercase">
           {staffName ? staffName.substring(0, 2) : "FL"}
@@ -178,20 +205,20 @@ const App = () => {
             <div className={`bg-white p-5 rounded-[28px] border border-slate-100 shadow-sm space-y-4 ${isSubmitted ? 'opacity-70' : ''}`}>
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 shadow-inner"><User size={20} /></div>
-                <div className="flex-1 text-left"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Họ tên nhân viên</label><input type="text" placeholder="Nhập tên..." value={staffName} disabled={isSubmitted} onChange={(e) => setStaffName(e.target.value)} className="w-full bg-slate-50 border-none rounded-xl p-2.5 text-sm font-bold outline-none text-left"/></div>
+                <div className="flex-1 text-left"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Nhân viên</label><input type="text" placeholder="Nhập tên..." value={staffName} disabled={isSubmitted} onChange={(e) => setStaffName(e.target.value)} className="w-full bg-slate-50 border-none rounded-xl p-2.5 text-sm font-bold outline-none"/></div>
               </div>
-              <div className="flex items-center space-x-3 border-t border-slate-50 pt-3 text-left">
+              <div className="flex items-center space-x-3 border-t border-slate-50 pt-3">
                 <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center text-orange-600 shadow-inner"><Users size={20} /></div>
-                <div className="flex-1 text-left"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Bộ phận trực</label><select className="w-full bg-slate-50 border-none rounded-xl p-2 text-sm font-bold outline-none text-left" value={selectedRole} disabled={isSubmitted} onChange={(e) => setSelectedRole(e.target.value)}>{ROLES.map(r => <option key={r} value={r}>{r}</option>)}</select></div>
+                <div className="flex-1 text-left"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Bộ phận</label><select className="w-full bg-slate-50 border-none rounded-xl p-2 text-sm font-bold outline-none" value={selectedRole} disabled={isSubmitted} onChange={(e) => setSelectedRole(e.target.value)}>{ROLES.map(r => <option key={r} value={r}>{r}</option>)}</select></div>
               </div>
             </div>
 
             <div className="space-y-2">
-              <h4 className="text-[11px] font-black text-slate-400 uppercase ml-1 tracking-widest text-left">Checklist công việc</h4>
+              <h4 className="text-[11px] font-black text-slate-400 uppercase ml-1 tracking-widest text-left">Checklist ca trực</h4>
               {checklists.map(item => (
                 <div key={item.id} className={`p-4 rounded-[22px] border transition-all flex items-center space-x-4 ${item.completed ? 'bg-green-50 border-green-100' : 'bg-white border-slate-100 shadow-sm'}`}>
                   <div onClick={() => !isSubmitted && staffName && item.photo && setChecklists(prev => prev.map(p => p.id === item.id ? {...p, completed: !p.completed} : p))} className={`w-7 h-7 rounded-xl border-2 flex items-center justify-center transition-all ${item.completed ? 'bg-green-500 border-green-500 text-white shadow-md' : item.photo ? 'border-orange-500 border-dashed animate-pulse' : 'border-slate-200'}`}>{item.completed && <CheckCircle2 size={18} />}</div>
-                  <div className="flex-1 min-w-0 text-left"><p className={`text-sm font-bold ${item.completed ? 'line-through text-slate-400 italic' : 'text-slate-700'}`}>{item.task}</p>{!item.photo && !isSubmitted && <span className="text-[9px] text-orange-500 font-bold uppercase italic mt-1 block tracking-tighter">Cần chụp ảnh minh chứng</span>}</div>
+                  <div className="flex-1 min-w-0 text-left"><p className={`text-sm font-bold ${item.completed ? 'line-through text-slate-400 italic' : 'text-slate-700'}`}>{item.task}</p>{!item.photo && !isSubmitted && <span className="text-[9px] text-orange-500 font-bold uppercase italic mt-1 block tracking-tighter">Cần chụp ảnh</span>}</div>
                   <button disabled={isSubmitted} onClick={() => handleCapture(item.id)} className={`p-3 rounded-2xl ${item.photo ? 'text-green-600 bg-green-100' : 'text-slate-400 bg-slate-50'}`}><Camera size={22} /></button>
                 </div>
               ))}
