@@ -1,1 +1,235 @@
-async function handleComplete() {\n    // Sanitizing checklists array before sending it to addDoc\n    const sanitizedChecklists = checklists.map(item => {\n        // Check for valid nested entities, return null for invalid ones\n        return (item && item.validField) ? item : null;\n    }).filter(item => item !== null);\n    \n    // Now, send sanitized data to addDoc\n    await addDoc(collection(db, 'collectionName'), {\n        checklists: sanitizedChecklists\n    });\n}
+import React, { useState, useEffect, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
+import { 
+  LayoutDashboard, CheckSquare, AlertTriangle, TrendingUp, 
+  CheckCircle2, X, Users, Camera, User, Star, UserPlus, 
+  Edit3, Trash2, Calendar, ChevronRight, RefreshCw
+} from 'lucide-react';
+
+// --- CẤU HÌNH FIREBASE ---
+const firebaseConfig = {
+  apiKey: "AIzaSyDIGMBaaTUwXO3dC8ww34_3RL81yVQKm-4",
+  authDomain: "farmers-market-a1e70.firebaseapp.com",
+  projectId: "farmers-market-a1e70",
+  storageBucket: "farmers-market-a1e70.firebasestorage.app",
+  messagingSenderId: "150088433809",
+  appId: "1:150088433809:web:bb6179c84e0be91fff3f30",
+  measurementId: "G-951E6BDX1M"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = "farmers-market-internal"; 
+
+const STORES_LIST = [
+  { id: "FM1", name: "FM1: Minh Khai" },
+  { id: "FM2", name: "FM2: Phan Xích Long" },
+  { id: "FM3", name: "FM3: Nguyễn Thị Thập" },
+  { id: "FM4", name: "FM4: Hoàng Hoa Thám" },
+  { id: "FM5", name: "FM5: Hai Bà Trưng" },
+  { id: "FM6", name: "FM6: Quang Trung" },
+  { id: "FM7", name: "FM7: Lumière Riverside" }
+];
+
+const ROLES = ["Quản Lý Ca", "Thu ngân", "Thu ngân online", "NV Gói Quà", "NV Vệ Sinh", "NV Fresh Food", "NV Trái Cây", "NV Rau Tươi", "NV Thực Phẩm Khô + Đông Lạnh", "Bảo Vệ"];
+
+const TASK_TEMPLATES = {
+  "Thu ngân": ["Kiểm tra tiền lẻ đầu ca", "Vệ sinh quầy thanh toán", "Kiểm tra giấy in bill", "Cập nhật khuyến mãi"],
+  "NV Trái Cây": ["Kiểm tra độ tươi Cam vàng Navel", "Lọc bỏ Táo Juliet dập/hỏng", "Phun sương giữ ẩm", "Kiểm tra tem nhãn"],
+  "NV Gói Quà": ["Chuẩn bị nơ mẫu quà tặng", "Kiểm tra date giỏ quà", "Vệ sinh bàn đóng gói"],
+  "Quản Lý Ca": ["Họp đầu ca (Briefing)", "Kiểm tra vệ sinh tổng", "Duyệt báo cáo QC"],
+};
+
+const REVENUE_TARGET = 700000000;
+
+const App = () => {
+  const [user, setUser] = useState(null);
+  const [activeTab, setActiveTab] = useState('checklist');
+  const [selectedStoreId, setSelectedStoreId] = useState(STORES_LIST[0].id);
+  const [selectedRole, setSelectedRole] = useState(ROLES[1]); 
+  const [staffName, setStaffName] = useState("");
+  const [checklists, setChecklists] = useState([]);
+  const [memberCount, setMemberCount] = useState(0);
+  const [googleReviewCount, setGoogleReviewCount] = useState(0);
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionTime, setSubmissionTime] = useState(null);
+  const [signature, setSignature] = useState(null);
+  const [showIssueModal, setShowIssueModal] = useState(false);
+  const [issueDetail, setIssueDetail] = useState("");
+  const [issuePhoto, setIssuePhoto] = useState(null);
+  const [submissionsHistory, setSubmissionsHistory] = useState([]);
+
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        await signInAnonymously(auth);
+      } catch (err) {
+        console.error("Auth error:", err);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const q = collection(db, 'artifacts', appId, 'public', 'data', 'checklist_submissions');
+    const unsub = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setSubmissionsHistory(data.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)));
+    });
+    return () => unsub();
+  }, [user]);
+
+  useEffect(() => {
+    const tasks = TASK_TEMPLATES[selectedRole] || ["Kiểm tra & Vệ sinh khu vực phụ trách"];
+    setChecklists(tasks.map((task, index) => ({ id: index, task, completed: false, photo: "" })));
+    setIsSubmitted(false);
+  }, [selectedRole]);
+
+  const handleCapture = (id) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.capture = 'environment';
+    input.onchange = (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          setChecklists(prev => prev.map(item => item.id === id ? { ...item, photo: event.target.result } : item));
+        };
+        reader.readAsDataURL(file);
+      }
+    };
+    input.click();
+  };
+
+  const handleComplete = async () => {
+    const allDone = checklists.every(item => item.completed && item.photo);
+    if (!staffName) return alert("Vui lòng nhập họ tên!");
+    if (!allDone) return alert("Vui lòng chụp ảnh và tích hoàn thành tất cả checklist!");
+    if (!signature) return alert("Vui lòng ký tên xác nhận!");
+
+    setIsSubmitting(true);
+    try {
+      const signatureData = canvasRef.current?.toDataURL('image/png', 0.3) || "";
+      
+      // CHỐT CHẶN: Ép kiểu dữ liệu về chuỗi/boolean đơn giản để Firestore không báo lỗi
+      const finalTasks = checklists.map(t => ({
+        taskName: String(t.task),
+        isDone: Boolean(t.completed),
+        img: String(t.photo || "")
+      }));
+
+      const payload = {
+        staff: String(staffName),
+        store: String(selectedStoreId),
+        role: String(selectedRole),
+        taskList: finalTasks, // Đây là danh sách đã làm sạch
+        members: Number(memberCount),
+        reviews: Number(googleReviewCount),
+        signImg: String(signatureData),
+        timestamp: serverTimestamp(),
+        dateText: new Date().toLocaleString('vi-VN')
+      };
+
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'checklist_submissions'), payload);
+      setSubmissionTime(payload.dateText);
+      setIsSubmitted(true);
+    } catch (error) {
+      alert("Lỗi hệ thống: " + error.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const clearSignature = () => {
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      setSignature(null);
+    }
+  };
+
+  return (
+    <div className="max-w-md mx-auto h-screen bg-slate-50 flex flex-col overflow-hidden relative font-sans text-slate-900">
+      <header className="bg-white px-6 pt-10 pb-5 border-b border-slate-100 flex justify-between items-center shrink-0 z-20 shadow-sm">
+        <div className="text-left">
+          <h1 className="text-xl font-black text-slate-900 tracking-tighter uppercase leading-none">FARMERS <span className="text-orange-500">MARKET</span></h1>
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-[3px] mt-1 text-left">{selectedStoreId}</p>
+        </div>
+        <div className="w-10 h-10 bg-slate-900 rounded-2xl flex items-center justify-center text-white font-black shadow-lg uppercase">
+          {staffName ? staffName.substring(0, 2) : "FL"}
+        </div>
+      </header>
+
+      <main className="flex-1 overflow-y-auto p-6 pb-32">
+        {activeTab === 'checklist' && (
+          <div className="space-y-4">
+            <div className={`bg-white p-5 rounded-[28px] border border-slate-100 shadow-sm space-y-4 ${isSubmitted ? 'opacity-70' : ''}`}>
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 shadow-inner"><User size={20} /></div>
+                <div className="flex-1 text-left"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Họ tên nhân viên</label><input type="text" placeholder="Nhập tên..." value={staffName} disabled={isSubmitted} onChange={(e) => setStaffName(e.target.value)} className="w-full bg-slate-50 border-none rounded-xl p-2.5 text-sm font-bold outline-none text-left"/></div>
+              </div>
+              <div className="flex items-center space-x-3 border-t border-slate-50 pt-3 text-left">
+                <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center text-orange-600 shadow-inner"><Users size={20} /></div>
+                <div className="flex-1 text-left"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Bộ phận trực</label><select className="w-full bg-slate-50 border-none rounded-xl p-2 text-sm font-bold outline-none text-left" value={selectedRole} disabled={isSubmitted} onChange={(e) => setSelectedRole(e.target.value)}>{ROLES.map(r => <option key={r} value={r}>{r}</option>)}</select></div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <h4 className="text-[11px] font-black text-slate-400 uppercase ml-1 tracking-widest text-left">Checklist công việc</h4>
+              {checklists.map(item => (
+                <div key={item.id} className={`p-4 rounded-[22px] border transition-all flex items-center space-x-4 ${item.completed ? 'bg-green-50 border-green-100' : 'bg-white border-slate-100 shadow-sm'}`}>
+                  <div onClick={() => !isSubmitted && staffName && item.photo && setChecklists(prev => prev.map(p => p.id === item.id ? {...p, completed: !p.completed} : p))} className={`w-7 h-7 rounded-xl border-2 flex items-center justify-center transition-all ${item.completed ? 'bg-green-500 border-green-500 text-white shadow-md' : item.photo ? 'border-orange-500 border-dashed animate-pulse' : 'border-slate-200'}`}>{item.completed && <CheckCircle2 size={18} />}</div>
+                  <div className="flex-1 min-w-0 text-left"><p className={`text-sm font-bold ${item.completed ? 'line-through text-slate-400 italic' : 'text-slate-700'}`}>{item.task}</p>{!item.photo && !isSubmitted && <span className="text-[9px] text-orange-500 font-bold uppercase italic mt-1 block tracking-tighter">Cần chụp ảnh minh chứng</span>}</div>
+                  <button disabled={isSubmitted} onClick={() => handleCapture(item.id)} className={`p-3 rounded-2xl ${item.photo ? 'text-green-600 bg-green-100' : 'text-slate-400 bg-slate-50'}`}><Camera size={22} /></button>
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-inner text-left">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Ký tên xác nhận</label>
+              <div className="relative h-32 bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl overflow-hidden touch-none">
+                {isSubmitted ? <div className="w-full h-full flex items-center justify-center p-2"><img src={signature} alt="Sign" className="max-h-full opacity-60" /></div> : (
+                  <canvas ref={canvasRef} width={400} height={150} className="w-full h-full cursor-crosshair" 
+                  onMouseDown={(e) => { const rect = canvasRef.current.getBoundingClientRect(); canvasRef.current.ctx = canvasRef.current.getContext('2d'); canvasRef.current.ctx.beginPath(); canvasRef.current.ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top); canvasRef.current.drawing = true; }}
+                  onMouseMove={(e) => { if(!canvasRef.current.drawing) return; const rect = canvasRef.current.getBoundingClientRect(); canvasRef.current.ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top); canvasRef.current.ctx.stroke(); setSignature("signed"); }}
+                  onMouseUp={() => canvasRef.current.drawing = false}
+                  onTouchStart={(e) => { const rect = canvasRef.current.getBoundingClientRect(); const touch = e.touches[0]; canvasRef.current.ctx = canvasRef.current.getContext('2d'); canvasRef.current.ctx.beginPath(); canvasRef.current.ctx.moveTo(touch.clientX - rect.left, touch.clientY - rect.top); canvasRef.current.drawing = true; }}
+                  onTouchMove={(e) => { if(!canvasRef.current.drawing) return; const rect = canvasRef.current.getBoundingClientRect(); const touch = e.touches[0]; canvasRef.current.ctx.lineTo(touch.clientX - rect.left, touch.clientY - rect.top); canvasRef.current.ctx.stroke(); setSignature("signed"); }}
+                  onTouchEnd={() => canvasRef.current.drawing = false} />
+                )}
+              </div>
+            </div>
+
+            {!isSubmitted ? <button onClick={handleComplete} disabled={isSubmitting} className="w-full bg-slate-900 text-white font-black py-5 rounded-[28px] shadow-2xl mt-4 flex items-center justify-center space-x-2 disabled:bg-slate-300 uppercase tracking-widest">{isSubmitting ? <RefreshCw size={18} className="animate-spin" /> : <Edit3 size={18} />} <span>NỘP BÁO CÁO</span></button> : (
+              <div className="bg-green-500 p-4 rounded-[28px] text-white flex items-center justify-between shadow-lg">
+                <div className="flex items-center space-x-3"><Calendar size={20} className="opacity-70" /><div className="text-left"><p className="text-[9px] font-bold uppercase opacity-70 leading-none">Hoàn thành lúc</p><p className="text-sm font-black mt-1">{submissionTime}</p></div></div>
+                <CheckCircle2 size={24} className="opacity-40" />
+              </div>
+            )}
+          </div>
+        )}
+      </main>
+
+      <nav className="absolute bottom-8 left-6 right-6 bg-white/90 backdrop-blur-md border border-slate-100 rounded-[35px] shadow-2xl px-2 py-4 flex justify-between items-center z-40">
+        {[ { id: 'dashboard', icon: LayoutDashboard, label: 'Home' }, { id: 'checklist', icon: CheckSquare, label: 'Việc' } ].map(tab => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 flex flex-col items-center space-y-1 transition-all ${activeTab === tab.id ? 'text-orange-500 scale-110' : 'text-slate-300'}`}><tab.icon size={22} /><span className="text-[9px] font-black uppercase tracking-tighter">{tab.label}</span></button>
+        ))}
+      </nav>
+    </div>
+  );
+};
+
+export default App;
+
