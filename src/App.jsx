@@ -5,7 +5,7 @@ import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from 'f
 import { 
   LayoutDashboard, CheckSquare, AlertTriangle, TrendingUp, 
   CheckCircle2, X, Users, Camera, User, Star, UserPlus, 
-  Edit3, Trash2, Calendar, ChevronRight, RefreshCw, Eye, FileText, MapPin
+  Edit3, Trash2, Calendar, ChevronRight, RefreshCw, Eye, FileText, Store
 } from 'lucide-react';
 
 // --- CẤU HÌNH FIREBASE ---
@@ -24,6 +24,7 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = "farmers-market-internal"; 
 
+// DANH SÁCH 7 CỬA HÀNG CỦA LỘC
 const STORES_LIST = [
   { id: "FM1", name: "FM1: Minh Khai" },
   { id: "FM2", name: "FM2: Phan Xích Long" },
@@ -43,6 +44,7 @@ const TASK_TEMPLATES = {
   "Quản Lý Ca": ["Họp đầu ca (Briefing)", "Kiểm tra vệ sinh tổng", "Duyệt báo cáo QC"],
 };
 
+// Hàm nén ảnh để không bị lỗi dung lượng Firestore
 const compressImage = (base64Str, maxWidth = 600, maxHeight = 600) => {
   return new Promise((resolve) => {
     const img = new Image();
@@ -137,16 +139,7 @@ const App = () => {
       };
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'checklist_submissions'), payload);
       setSubmissionTime(payload.dateText); setIsSubmitted(true);
-    } catch (error) { alert("Lỗi: " + error.message); } finally { setIsSubmitting(false); }
-  };
-
-  const clearSignature = () => {
-    const canvas = canvasRef.current;
-    if (canvas) {
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      setSignature(null);
-    }
+    } catch (error) { alert("Lỗi nộp báo cáo: " + error.message); } finally { setIsSubmitting(false); }
   };
 
   return (
@@ -156,7 +149,7 @@ const App = () => {
           <h1 className="text-xl font-black text-slate-900 tracking-tighter uppercase leading-none">FARMERS <span className="text-orange-500">MARKET</span></h1>
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-[3px] mt-1 text-left">{selectedStoreId}</p>
         </div>
-        <button onClick={() => setActiveTab('reports')} className="w-10 h-10 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-600 shadow-sm border border-slate-200">
+        <button onClick={() => setActiveTab('reports')} className="w-10 h-10 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 shadow-sm border border-slate-100">
           <Eye size={20} />
         </button>
       </header>
@@ -164,12 +157,25 @@ const App = () => {
       <main className="flex-1 overflow-y-auto p-6 pb-32">
         {activeTab === 'checklist' && (
           <div className="space-y-4">
-            {/* Form nộp checklist (Giữ nguyên như cũ) */}
             <div className={`bg-white p-5 rounded-[28px] border border-slate-100 shadow-sm space-y-4 ${isSubmitted ? 'opacity-70' : ''}`}>
+              {/* NHÂN VIÊN */}
               <div className="flex items-center space-x-3 text-left">
                 <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 shadow-inner"><User size={20} /></div>
                 <div className="flex-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Nhân viên</label><input type="text" placeholder="Nhập tên..." value={staffName} disabled={isSubmitted} onChange={(e) => setStaffName(e.target.value)} className="w-full bg-slate-50 border-none rounded-xl p-2.5 text-sm font-bold outline-none"/></div>
               </div>
+              
+              {/* CHỌN CỬA HÀNG (ĐÃ KHÔI PHỤC) */}
+              <div className="flex items-center space-x-3 border-t border-slate-50 pt-3 text-left">
+                <div className="w-10 h-10 bg-green-50 rounded-xl flex items-center justify-center text-green-600 shadow-inner"><Store size={20} /></div>
+                <div className="flex-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Cửa hàng</label>
+                  <select className="w-full bg-slate-50 border-none rounded-xl p-2 text-sm font-bold outline-none" value={selectedStoreId} disabled={isSubmitted} onChange={(e) => setSelectedStoreId(e.target.value)}>
+                    {STORES_LIST.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {/* BỘ PHẬN */}
               <div className="flex items-center space-x-3 border-t border-slate-50 pt-3 text-left">
                 <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center text-orange-600 shadow-inner"><Users size={20} /></div>
                 <div className="flex-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Bộ phận</label><select className="w-full bg-slate-50 border-none rounded-xl p-2 text-sm font-bold outline-none" value={selectedRole} disabled={isSubmitted} onChange={(e) => setSelectedRole(e.target.value)}>{ROLES.map(r => <option key={r} value={r}>{r}</option>)}</select></div>
@@ -202,7 +208,7 @@ const App = () => {
               </div>
             </div>
 
-            {!isSubmitted ? <button onClick={handleComplete} disabled={isSubmitting} className="w-full bg-slate-900 text-white font-black py-5 rounded-[28px] shadow-2xl mt-4 flex items-center justify-center space-x-2 disabled:bg-slate-300 uppercase tracking-widest">{isSubmitting ? <RefreshCw size={18} className="animate-spin" /> : <Edit3 size={18} />} <span>NỘP BÁO CÁO</span></button> : (
+            {!isSubmitted ? <button onClick={handleComplete} disabled={isSubmitting} className="w-full bg-slate-900 text-white font-black py-5 rounded-[28px] shadow-2xl mt-4 flex items-center justify-center space-x-2 disabled:bg-slate-300 uppercase tracking-widest italic">{isSubmitting ? <RefreshCw size={18} className="animate-spin" /> : <Edit3 size={18} />} <span>NỘP BÁO CÁO</span></button> : (
               <div className="bg-green-500 p-4 rounded-[28px] text-white flex items-center justify-between shadow-lg">
                 <div className="flex items-center space-x-3"><Calendar size={20} className="opacity-70" /><div className="text-left"><p className="text-[9px] font-bold uppercase opacity-70 leading-none">Hoàn thành lúc</p><p className="text-sm font-black mt-1">{submissionTime}</p></div></div>
                 <CheckCircle2 size={24} className="opacity-40" />
@@ -215,7 +221,7 @@ const App = () => {
           <div className="space-y-4">
             <h3 className="text-lg font-black uppercase tracking-tighter text-left">LỊCH SỬ BÁO CÁO</h3>
             {submissionsHistory.length === 0 ? (
-              <p className="text-slate-400 text-sm italic py-10">Chưa có báo cáo nào được nộp.</p>
+              <p className="text-slate-400 text-sm italic py-10 text-left">Chưa có dữ liệu nào nộp về.</p>
             ) : (
               submissionsHistory.map(sub => (
                 <button key={sub.id} onClick={() => setSelectedReport(sub)} className="w-full bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm flex items-center space-x-4 active:scale-95 transition-all text-left">
@@ -239,34 +245,28 @@ const App = () => {
         ))}
       </nav>
 
-      {/* MODAL CHI TIẾT BÁO CÁO CHO QUẢN LÝ */}
+      {/* CHI TIẾT DÀNH CHO QUẢN LÝ */}
       {selectedReport && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-end justify-center">
           <div className="bg-white w-full max-w-md h-[90vh] rounded-t-[45px] flex flex-col shadow-2xl animate-in slide-in-from-bottom duration-300">
             <div className="p-8 border-b border-slate-50 flex justify-between items-center shrink-0">
               <div className="text-left">
-                <h3 className="text-xl font-black text-slate-800 tracking-tighter uppercase">CHI TIẾT BÁO CÁO</h3>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{selectedReport.staff} • {selectedReport.store}</p>
+                <h3 className="text-xl font-black text-slate-800 tracking-tighter uppercase leading-none">CHI TIẾT BÁO CÁO</h3>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">{selectedReport.staff} • {selectedReport.store}</p>
               </div>
               <button onClick={() => setSelectedReport(null)} className="p-2 bg-slate-50 rounded-2xl text-slate-400"><X size={24} /></button>
             </div>
-            
             <div className="flex-1 overflow-y-auto p-8 space-y-6">
               <div className="space-y-4">
-                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-left">Công việc đã hoàn thành</h4>
                 {selectedReport.taskList?.map((task, idx) => (
-                  <div key={idx} className="bg-slate-50 p-4 rounded-3xl border border-slate-100">
-                    <div className="flex items-center space-x-3 mb-3">
-                      <CheckCircle2 size={16} className="text-green-500" />
-                      <p className="text-sm font-bold text-slate-700 text-left">{task.taskName}</p>
-                    </div>
+                  <div key={idx} className="bg-slate-50 p-4 rounded-3xl border border-slate-100 text-left">
+                    <div className="flex items-center space-x-3 mb-3"><CheckCircle2 size={16} className="text-green-500" /><p className="text-sm font-bold text-slate-700">{task.taskName}</p></div>
                     {task.img && <img src={task.img} alt="Bằng chứng" className="w-full h-48 object-cover rounded-2xl shadow-sm border border-white" />}
                   </div>
                 ))}
               </div>
-
               <div className="space-y-4 pt-4 border-t border-slate-50 text-left">
-                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Chữ ký nhân viên</h4>
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Chữ ký xác nhận</h4>
                 <div className="bg-slate-50 p-4 rounded-3xl border border-slate-100 flex items-center justify-center h-32">
                   {selectedReport.signImg ? <img src={selectedReport.signImg} alt="Signature" className="max-h-full opacity-70" /> : <p className="text-xs italic text-slate-300">Không có chữ ký</p>}
                 </div>
